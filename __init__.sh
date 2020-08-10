@@ -15,3 +15,22 @@ if [[ ! -v __INIT_PATH_LIST__[@] ]]; then
         ["$(cd $(dirname "${BASH_SOURCE}"); pwd -P)"]=''
     )
 fi
+
+#=============================================================================
+# DEBUG
+#=============================================================================
+function debug::on {
+    export PS4='+ [${BASH_SOURCE}:${FUNCNAME[0]}(): ${LINENO}]:> '
+
+    set -v
+    set -x
+
+    return
+}
+
+function debug::off {
+    set +v
+    set +x
+
+    return
+}
