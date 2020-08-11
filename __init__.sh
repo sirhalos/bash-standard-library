@@ -20,7 +20,7 @@ fi
 # DEBUG
 #=============================================================================
 function debug::on {
-    export PS4='+ [${BASH_SOURCE}:${FUNCNAME[0]}(): ${LINENO}]:> '
+    declare -gxr PS4='+ [${BASH_SOURCE}:${FUNCNAME[0]}(): ${LINENO}]:> '
 
     set -v
     set -x
