@@ -53,11 +53,11 @@ function error {
     tput sgr0 >&2
     tput bold >&2
     tput setaf 1; printf "%b" "\U1F480"
-    #tput setaf 7; printf ' ['  >&2
-    #tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
-    #tput setaf 4; printf "%s" "${func_name}():"  >&2
-    #tput setaf 3; printf "%s" "${lineno}"  >&2
-    #tput setaf 7; printf "%s " '] -'  >&2
+    tput setaf 7; printf ' ['  >&2
+    tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
+    tput setaf 4; printf "%s" "${func_name}():"  >&2
+    tput setaf 3; printf "%s" "${lineno}"  >&2
+    tput setaf 7; printf "%s " '] -'  >&2
     tput setaf 1; printf "%s\n" " ERROR: $@" >&2
 
     while [[ "${bash_source_count}" -ne "${trace_count}" ]]; do
@@ -94,7 +94,42 @@ function namespace {
         error 'Invalid number of arguments'
     fi
 
+    if [[ ! "${1}" =~ ^[A-Za-z] ]]; then
+        error 'Namespace must start with a char'
+    fi
+
     declare -gx __NAMESPACE__="${1}"
+
+    return
+}
+
+#=============================================================================
+# FROM
+#=============================================================================
+function from {
+    if [[ "$#" -lt 3 ]]; then
+        error 'Invalid number of arguments'
+    fi
+
+    for i in "${@}"; do
+        case "${i}" in
+            -h | --help )
+                usage::__init__::from; exit 0
+                ;;
+        esac
+    done
+
+    if [[ "${1}" =~ ^\- ]]; then
+        error 'First argument must be either a namespace or a path'
+    fi
+
+    if [[ "${2}" != 'import' ]]; then
+        error 'Second argument must be import'
+    fi
+
+    local -r from="${1}"; shift 2
+
+    import --from="${from}" $@
 
     return
 }
@@ -115,10 +150,10 @@ function import {
     local reload
     local translated_import
 
-    if [[ "$#" -gt 0 ]]; then
+    while [[ "$#" -gt 0 ]]; do
         case "${1}" in
             -d | --debug )
-                readonly debug='True';      shift
+                readonly debug='True';    shift
 
                 debug::on
                 ;;
@@ -128,30 +163,23 @@ function import {
                 if [[ "$#" -eq 0 ]]; then
                     error 'Invalid number of arguments'
                 else
-                    readonly from="${1}";   shift
+                    readonly from="${1}"; shift
                 fi
 
                 ;;
             --from=* )
-                readonly from="${1#*=}";    shift
+                readonly from="${1#*=}";  shift
                 ;;
             -h | --help )
-                usage::__init__::import;    exit 0
+                usage::__init__::import;  exit 0
                 ;;
             -r | --reload )
-                readonly reload='True';     shift
+                readonly reload='True';   shift
                 ;;
-        esac
-    fi
-
-    while [[ "$#" -gt 0 ]]; do
-        case "${1}" in
             * )
-                imports+=( "${1}" )
+                imports+=( "${1}" );      shift
                 ;;
         esac
-
-        shift
     done
 
     for import in "${imports[@]}"; do
@@ -372,20 +400,86 @@ __SCRIPT__
 #=============================================================================
 # USAGE
 #=============================================================================
+function usage::__init__::from {
+>&2 cat <<__USAGE__
+
+Usage:
+    from <namespace | path> import [-d] [-h] [-r] <imports[0]> <imports[1]>
+                                                  <imports[2]> ...
+
+Optional Arguments:
+    -d, --debug                 Display debug information of path searches
+    -h, --help                  Display function usage information
+    -r, --reload                Re-import import even if imported previously
+
+Required Argument:
+    @imports
+
+Examples:
+    from '.' import 'test_01.sh' 'test_02.sh' 'test_03.sh'
+    from 'dir1::dir2' import 'test_01' 'test_02' 'test_03'
+    from 'dir1' import 'dir2/test_01.sh'
+    from 'tmp' import 'dir1::test_01'
+    from '../../../' import 'tmp/dir1/test_01.sh'
+
+Description:
+    Provides the ability import source functions and variables from files.
+    Imports will only once occur once unless the reload argument is provided.
+
+Notes:
+    The from string and imports array can be provided in 1 of 3 varieties.
+        * Namespace
+        * Relative path
+        * Absolute path
+
+    Namespace:
+        - COULD have '::' in the name
+        - NEVER has a '/' in the name
+        - MUST NOT end in '.sh' if name is an 'imports' array element
+        - DO NOT need to specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
+
+    Relative path:
+        - NEVER has '::' in the name
+        - COULD have a '/' in the name
+        - NEVER starts with a '/'
+        - MUST end in '.sh' if name is an 'imports' array element
+        - MUST specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
+
+    Absolute path:
+        - NEVER has '::' in the name
+        - MUST have a '/' in the name
+        - MUST start with a '/'
+        - MUST end in '.sh' if name is an 'imports' array element
+        - MUST specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
+
+__USAGE__
+
+    return
+}
+
 function usage::__init__::import {
 >&2 cat <<__USAGE__
 
 Usage:
-    import [-d] [-h] [-r] <path1> <path2> <path3> ...
+    import [-d] [-f from] [-h] [-r] <imports[0]> <imports[1]> <imports[2]> ...
 
 Optional Arguments:
-    -d, --debug                 Display debug information of path search
+    -d, --debug                 Display debug information of path searches
     -f, --from                  Prepend a namespace or path to import paths
     -h, --help                  Display function usage information
-    -r, --reload                Re-source item if sourced previously
+    -r, --reload                Re-import import even if previously imported
 
 Required Argument:
-    @paths
+    @imports
 
 Examples:
     import 'test_01.sh' 'test_02.sh' 'test_03.sh'
@@ -395,36 +489,42 @@ Examples:
     import '../../../tmp/dir1/test_01.sh'
 
 Description:
-    Provides the ability import files. Files will only be imported once
-    regardless of how many times the file is specified in other files being
-    sourced.
+    Provides the ability import source functions and variables from files.
+    Imports will only once occur once unless the reload argument is provided.
 
-Notes:
-    The import command can take a file path argument in 1 of 3 varieties.
+    The from string and imports array can be provided in 1 of 3 varieties.
         * Namespace
         * Relative path
         * Absolute path
 
-Namespace:
-    - Can have :: in the name, but may not if it is a single word
-    - Does NOT have a slash in the name
-    - 'lib' directories does NOT need to be specified
-    - Searching will occur from the base of the repo where '__init__.sh' lives
+    Namespace:
+        - COULD have '::' in the name
+        - NEVER has a '/' in the name
+        - MUST NOT end in '.sh'
+        - DO NOT need to specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
 
-Relative path:
-    - Will NEVER have :: in the name
-    - Will ALWAYS have a slash in the name, if the name is a single word,
-      then the name needs to end in a '.sh' extension to represent that it
-      is a relative path
-    - Will NEVER start with a slash
-    - 'lib' directories must ALWAYS be specified
-    - Searching will occur from the callers directory path
+    Relative path:
+        - NEVER has '::' in the name
+        - COULD have a '/' in the name
+        - NEVER starts with a '/'
+        - MUST end in '.sh'
+        - MUST specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
 
-Absolute path:
-    - Will NEVER have :: in the name
-    - Will ALWAYS have a slash in the name
-    - Will ALWAYS start with a slash
-    - MUST end in '.sh' extension
+    Absolute path:
+        - NEVER has '::' in the name
+        - MUST have a '/' in the name
+        - MUST start with a '/'
+        - MUST end in '.sh'
+        - MUST specify 'lib' directories
+        - IF the function 'import::path::add' was used, then the additional
+          paths will be searched first, followed by the base path of the
+          repo where '__init__.sh' is located
 
 __USAGE__
 
