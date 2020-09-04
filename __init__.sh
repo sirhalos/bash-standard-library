@@ -362,12 +362,10 @@ __SCRIPT__
         fi
     done
 
-
-exit
     if [[ -n "${debug:-}" ]] && [[ "${debug:-}" == 'True' ]]; then
         debug::off
     fi
-echo "${one_var}"
+
     return
 }
 
