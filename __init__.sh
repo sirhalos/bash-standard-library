@@ -427,6 +427,13 @@ Description:
     Imports will only once occur once unless the reload argument is provided.
 
 Notes:
+    Searched paths:
+        IF the function 'init::path::prepend' was used, then the
+        additional paths will be searched first, followed by the base path
+        of the location where '__init__.sh' is located, then IF the
+        function 'init::path::append' was used, then the additional
+        paths will be searched last
+
     The from string and imports array can be provided in 1 of 3 varieties.
         * Namespace
         * Relative path
@@ -437,9 +444,6 @@ Notes:
         - NEVER has a '/' in the name
         - MUST NOT end in '.sh' if name is an 'imports' array element
         - DO NOT need to specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
     Relative path:
         - NEVER has '::' in the name
@@ -447,9 +451,6 @@ Notes:
         - NEVER starts with a '/'
         - MUST end in '.sh' if name is an 'imports' array element
         - MUST specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
     Absolute path:
         - NEVER has '::' in the name
@@ -457,9 +458,6 @@ Notes:
         - MUST start with a '/'
         - MUST end in '.sh' if name is an 'imports' array element
         - MUST specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
 __USAGE__
 
@@ -492,6 +490,14 @@ Description:
     Provides the ability import source functions and variables from files.
     Imports will only once occur once unless the reload argument is provided.
 
+Notes:
+    Searched paths:
+        IF the function 'init::path::prepend' was used, then the
+        additional paths will be searched first, followed by the base path
+        of the location where '__init__.sh' is located, then IF the
+        function 'init::path::append' was used, then the additional
+        paths will be searched last
+
     The from string and imports array can be provided in 1 of 3 varieties.
         * Namespace
         * Relative path
@@ -502,9 +508,6 @@ Description:
         - NEVER has a '/' in the name
         - MUST NOT end in '.sh'
         - DO NOT need to specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
     Relative path:
         - NEVER has '::' in the name
@@ -512,9 +515,6 @@ Description:
         - NEVER starts with a '/'
         - MUST end in '.sh'
         - MUST specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
     Absolute path:
         - NEVER has '::' in the name
@@ -522,9 +522,6 @@ Description:
         - MUST start with a '/'
         - MUST end in '.sh'
         - MUST specify 'lib' directories
-        - IF the function 'import::path::add' was used, then the additional
-          paths will be searched first, followed by the base path of the
-          repo where '__init__.sh' is located
 
 __USAGE__
 
