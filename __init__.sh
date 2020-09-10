@@ -2,6 +2,11 @@
 set -Eeuo pipefail
 
 #=============================================================================
+# TRAP
+#=============================================================================
+trap error ERR SIGINT SIGTERM
+
+#=============================================================================
 # GLOBAL
 #=============================================================================
 declare -gxr TERM='xterm-256color'
@@ -12,7 +17,7 @@ fi
 
 if [[ ! -v __INIT_PATH_LIST__[@] ]]; then
     declare -Agx __INIT_PATH_LIST__=(
-        ["$(cd $(dirname "${BASH_SOURCE}"); pwd -P)"]=''
+        ["$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"]=''
     )
 fi
 
@@ -44,7 +49,10 @@ function error {
     local -i indent=0
     local -i lineno_count=0
     local -i bash_source_count=1
-    local -i trace_count="$(expr ${#BASH_SOURCE[@]} - 1)"
+
+    trace_count="$((${#BASH_SOURCE[@]} - 1))"
+
+    local -i trace_count
 
     local -i lineno="${BASH_LINENO[${lineno_count}]}"
     local bash_source="${BASH_SOURCE[${bash_source_count}]}"
@@ -52,13 +60,13 @@ function error {
 
     tput sgr0 >&2
     tput bold >&2
-    tput setaf 1; printf "%b" "\U1F480"
-    tput setaf 7; printf ' ['  >&2
+    tput setaf 1; printf "%b" "\U1F480" >&2
+    tput setaf 7; printf ' [' >&2
     tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
-    tput setaf 4; printf "%s" "${func_name}():"  >&2
-    tput setaf 3; printf "%s" "${lineno}"  >&2
-    tput setaf 7; printf "%s " '] -'  >&2
-    tput setaf 1; printf "%s\n" " ERROR: $@" >&2
+    tput setaf 4; printf "%s" "${func_name}():" >&2
+    tput setaf 3; printf "%s" "${lineno}" >&2
+    tput setaf 7; printf "%s " '] -' >&2
+    tput setaf 1; printf "%s\n" " ERROR: $*" >&2
 
     while [[ "${bash_source_count}" -ne "${trace_count}" ]]; do
         (( lineno_count += 1 ))
@@ -129,7 +137,7 @@ function from {
 
     local -r from="${1}"; shift 2
 
-    import --from="${from}" $@
+    import --from="${from}" "$@"
 
     return
 }
@@ -182,6 +190,8 @@ function import {
         esac
     done
 
+    local self_source
+
     for import in "${imports[@]}"; do
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Namespace-based
@@ -194,7 +204,7 @@ function import {
            [[ ! "${import}" =~ \.sh$ ]]
         then
             # Delimiters can only be single characters, so change :: to :
-            namespace_import=$(echo "${import}" | sed 's/::/:/g')
+            namespace_import="${import/::/:}"
 
             if [[ "${namespace_import}" =~ : ]]; then
                 # Create an array of paths to walk down separated on ':'
@@ -204,7 +214,7 @@ function import {
                 paths=( "${namespace_import}" )
             fi
 
-            local -r namespace_imported
+            local namespace_imported
 
             for init_path in "${!__INIT_PATH_LIST__[@]}"; do
                 translated_import="${init_path}"
@@ -250,7 +260,8 @@ function import {
              [[   "${import}" =~ \/    || ! "${import}" =~ \/ ]] && \
              [[   "${import}" =~ \.sh$ ]]
         then
-            translated_import="$(cd $(dirname "${0}"); pwd -P)/${import}"
+            translated_import="$(cd "$(dirname "${BASH_SOURCE[1]}")" \
+                                 pwd -P)/${import}"
 
             if [[ ! -f "${translated_import}" ]]; then
                 error "Unable to find import '${translated_import}'"
@@ -283,9 +294,9 @@ function import {
             unset __INIT_IMPORT_LIST__["${translated_import}"]
         fi
 
-        local self_source="$(
-            cd $(dirname "${BASH_SOURCE}")
-            pwd -P)/$(basename "${BASH_SOURCE}"
+        self_source="$(
+            cd "$(dirname "${BASH_SOURCE[0]}")"
+            pwd -P)/$(basename "${BASH_SOURCE[0]}"
         )"
 
         if [[ ! -v __INIT_IMPORT_LIST__["${translated_import}"] ]]; then
@@ -298,31 +309,29 @@ function import {
 __SCRIPT__
                          )"
 
-            local -ar outer_functions=(
-                $(compgen -A 'function' | sort)
-            )
+            mapfile -t outer_functions < <(compgen -A 'function' | sort)
+            readonly outer_functions
 
-            local -ar outer_variables=(
-                $(compgen -A 'variable' | sort)
-            )
+            mapfile -t outer_variables < <(compgen -A 'variable' | sort)
+            readonly outer_variables
 
-            local -ar inner_functions=(
-                $(env -i bash --noprofile --norc << __SCRIPT__
+            mapfile -t inner_functions < <(env -i bash --noprofile --norc << __SCRIPT__
                   source "${self_source}"
                   source "${translated_import}"
 
                   compgen -A 'function' | sort
 __SCRIPT__
-                  ) )
+                  )
+            readonly inner_functions
 
-            local -ar inner_variables=(
-                $(env -i bash --noprofile --norc << __SCRIPT__
+            mapfile -t inner_variables < <(env -i bash --noprofile --norc << __SCRIPT__
                   source "${self_source}"
                   source "${translated_import}"
 
                   compgen -A 'variable' | sort
 __SCRIPT__
-                  ) )
+                  )
+            readonly inner_variables
 
             local function_body
 
@@ -381,7 +390,7 @@ __SCRIPT__
 __SCRIPT__
                     )"
 
-                if [[ -v "$(echo "${i}")" ]]; then
+                if [[ -v "${i}" ]]; then
                     error "Variable '${i}' in '${import}' is already defined"
                 else
                     eval "${variable_declare}"
@@ -397,6 +406,88 @@ __SCRIPT__
     return
 }
 
+#=============================================================================
+# INIT
+#=============================================================================
+function init::import::list {
+    if [[ "$#" -ne 0 ]]; then
+        error 'Invalid number of arguments'
+    fi
+
+    printf "%s\n" "${!__INIT_IMPORT_LIST__[@]}"
+}
+
+function init::path::append {
+    if [[ "$#" -eq 0 ]]; then
+        error 'Invalid number of arguments'
+    fi
+
+    local fully_qualified_path
+    local -r cwd="$(pwd -P)"
+
+    cd "$(dirname "${BASH_SOURCE[1]}")"
+
+    for i in "${@}"; do
+        fully_qualified_path="$(cd "${i}"; pwd -P)"
+
+        if [[ ! -d "${fully_qualified_path}" ]]; then
+            warning "Path ${i} is not a directory"
+        fi
+
+        if [[ -v __INIT_PATH_LIST__["${fully_qualified_path}"] ]]; then
+            warning "Path ${i} already in init::path"
+        else
+            __INIT_PATH_LIST__["${fully_qualified_path}"]=''
+        fi
+    done
+
+    cd "${cwd}"
+
+    return
+}
+
+function init::path::list {
+    if [[ "$#" -ne 0 ]]; then
+        error 'Invalid number of arguments'
+    fi
+
+    printf "%s\n" "${!__INIT_PATH_LIST__[@]}"
+}
+
+# function init::path::prepend {
+
+# }
+
+#=============================================================================
+# WARNING
+#=============================================================================
+function warning {
+    debug::off
+
+    local -i indent=0
+    local -i lineno_count=0
+    local -i bash_source_count=1
+
+    trace_count="$((${#BASH_SOURCE[@]}-1))"; local -i trace_count
+
+
+    local -i lineno="${BASH_LINENO[${lineno_count}]}"
+    local bash_source="${BASH_SOURCE[${bash_source_count}]}"
+    local func_name="${FUNCNAME[${bash_source_count}]}"
+
+    tput sgr0
+    tput bold >&2
+    tput setaf 1; printf "%b" "\U1F6A7" >&2
+    tput setaf 7; printf ' [' >&2
+    tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
+    tput setaf 4; printf "%s" "${func_name}():" >&2
+    tput setaf 3; printf "%s" "${lineno}" >&2
+    tput setaf 7; printf "%s " '] -' >&2
+    tput setaf 3; printf "%s\n" " WARNING: $*" >&2
+    tput sgr0 >&2
+
+    return
+}
 #=============================================================================
 # USAGE
 #=============================================================================
