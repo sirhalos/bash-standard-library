@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+set -o errexit              # exit immediately if any command returns non-0
+set -o errtrace             # subshells should inherit error handlers/traps
+set -o nounset              # make using undefined variables throw an error
+set -o pipefail             # exit from pipe if any command within fails
+
+shopt -s dotglob            # make * globs also match .hidden files
+shopt -s inherit_errexit    # make subshells inherit errexit behavior
+
+IFS=$'\n'                   # set array separator to newline
+
 
 #=============================================================================
 # TRAP
 #=============================================================================
-trap error ERR SIGINT SIGTERM
+trap 'error ERR' ERR
+trap 'error SIGINT' SIGINT
+trap 'error SIGPIPE' SIGPIPE
+trap 'error SIGQUIT' SIGQUIT
+trap 'error SIGTSTP' SIGTSTP
+trap 'error SIGALRM' SIGALRM
 
 #=============================================================================
 # GLOBAL
@@ -66,7 +80,8 @@ function error {
     tput setaf 4; printf "%s" "${func_name}():" >&2
     tput setaf 3; printf "%s" "${lineno}" >&2
     tput setaf 7; printf "%s " '] -' >&2
-    tput setaf 1; printf "%s\n" " ERROR: $*" >&2
+    tput setaf 1; printf "%s" " ERROR: " >&2
+    tput setaf 7; printf "%s\n" "$*" >&2
 
     while [[ "${bash_source_count}" -ne "${trace_count}" ]]; do
         (( lineno_count += 1 ))
@@ -232,11 +247,11 @@ function import {
                 fi
 
                 if [[ -f "${translated_import}/${paths[-1]}.sh" ]]; then
-                    readonly namespace_imported='True'
+                    namespace_imported='True'
 
                     translated_import+="/${paths[-1]}.sh"; break 1
                 elif [[ -f "${import}/lib/${paths[-1]}.sh" ]]; then
-                    readonly namespace_imported='True'
+                    namespace_imported='True'
 
                     translated_import+="/lib/${paths[-1]}.sh"; break 1
                 else
@@ -247,7 +262,6 @@ function import {
             if [[ -z "${namespace_imported:-}" ]]; then
                 error "Unable to find import '${import}'"
             fi
-
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Relative-path
         #   - Does NOT have :: in the name
@@ -310,28 +324,25 @@ __SCRIPT__
                          )"
 
             mapfile -t outer_functions < <(compgen -A 'function' | sort)
-            readonly outer_functions
-
             mapfile -t outer_variables < <(compgen -A 'variable' | sort)
-            readonly outer_variables
 
-            mapfile -t inner_functions < <(env -i bash --noprofile --norc << __SCRIPT__
+            mapfile -t inner_functions < \
+                <(env -i bash --noprofile --norc << __SCRIPT__
                   source "${self_source}"
                   source "${translated_import}"
 
                   compgen -A 'function' | sort
 __SCRIPT__
                   )
-            readonly inner_functions
 
-            mapfile -t inner_variables < <(env -i bash --noprofile --norc << __SCRIPT__
+            mapfile -t inner_variables < \
+                <(env -i bash --noprofile --norc << __SCRIPT__
                   source "${self_source}"
                   source "${translated_import}"
 
                   compgen -A 'variable' | sort
 __SCRIPT__
                   )
-            readonly inner_variables
 
             local function_body
 
@@ -363,7 +374,8 @@ __SCRIPT__
                     eval "${namespace}::${i}() { ${function_body} }"
                 else
                     if [[ $(declare -f "${i}" &> /dev/null) ]]; then
-                        error "Function '${i}' in '${import}' is already defined"
+                        error \
+                            "Function '${i}' in '${import}' is already defined"
                     fi
 
                     eval "${i}() { ${function_body} }"
@@ -407,58 +419,6 @@ __SCRIPT__
 }
 
 #=============================================================================
-# INIT
-#=============================================================================
-function init::import::list {
-    if [[ "$#" -ne 0 ]]; then
-        error 'Invalid number of arguments'
-    fi
-
-    printf "%s\n" "${!__INIT_IMPORT_LIST__[@]}"
-}
-
-function init::path::append {
-    if [[ "$#" -eq 0 ]]; then
-        error 'Invalid number of arguments'
-    fi
-
-    local fully_qualified_path
-    local -r cwd="$(pwd -P)"
-
-    cd "$(dirname "${BASH_SOURCE[1]}")"
-
-    for i in "${@}"; do
-        fully_qualified_path="$(cd "${i}"; pwd -P)"
-
-        if [[ ! -d "${fully_qualified_path}" ]]; then
-            warning "Path ${i} is not a directory"
-        fi
-
-        if [[ -v __INIT_PATH_LIST__["${fully_qualified_path}"] ]]; then
-            warning "Path ${i} already in init::path"
-        else
-            __INIT_PATH_LIST__["${fully_qualified_path}"]=''
-        fi
-    done
-
-    cd "${cwd}"
-
-    return
-}
-
-function init::path::list {
-    if [[ "$#" -ne 0 ]]; then
-        error 'Invalid number of arguments'
-    fi
-
-    printf "%s\n" "${!__INIT_PATH_LIST__[@]}"
-}
-
-# function init::path::prepend {
-
-# }
-
-#=============================================================================
 # WARNING
 #=============================================================================
 function warning {
@@ -483,7 +443,8 @@ function warning {
     tput setaf 4; printf "%s" "${func_name}():" >&2
     tput setaf 3; printf "%s" "${lineno}" >&2
     tput setaf 7; printf "%s " '] -' >&2
-    tput setaf 3; printf "%s\n" " WARNING: $*" >&2
+    tput setaf 3; printf "%s" " WARNING: "
+    tput setaf 7; printf "%s\n" "$*" >&2
     tput sgr0 >&2
 
     return
