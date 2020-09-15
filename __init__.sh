@@ -31,7 +31,7 @@ fi
 
 if [[ ! -v __INIT__path_list__[@] ]]; then
     declare -Agx __INIT__path_list__=(
-        ["$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"]=''
+        ["$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)/lib"]=''
     )
 fi
 
@@ -199,9 +199,6 @@ function import {
             -r | --reload )
                 readonly reload='True';   shift
                 ;;
-            -u | --unsafe )
-                readonly unsafe='True';   shift
-                ;;
             * )
                 imports+=( "${1}" );      shift
                 ;;
@@ -318,146 +315,86 @@ function import {
 
         if [[ ! -v __INIT__import_list__["${translated_import}"] ]]; then
             __INIT__import_list__["${translated_import}"]=''
+
+            mapfile -t outer_functions < <(compgen -A 'function' | sort)
+            mapfile -t outer_variables < <(compgen -A 'variable' | sort)
+
             namespace="$(env -i bash --noprofile --norc << __SCRIPT__
-                         source "${self_source}"
-                         source "${translated_import}"
+                source "${self_source}"
+                source "${translated_import}"
 
-                         echo "\${__INIT__namespace__:-}"
-__SCRIPT__
-                         )"
-
-            if [[ "${unsafe:-}" == 'True' ]]; then
-                local -r inner_functions="$(
-                    env -i bash --noprofile --norc << __SCRIPT__
-                    source "${translated_import}" &> /dev/null
-
-                    declare -f
+                echo "\${__INIT__namespace__:-}"
 __SCRIPT__
                 )"
 
-                local -r inner_variables="$(
-                    env -i bash --noprofile --norc << __SCRIPT__
-                    source "${translated_import}" &> /dev/null
+            mapfile -t inner_functions < \
+                <(env -i bash --noprofile --norc << __SCRIPT__
+                source "${translated_import}" &> /dev/null
 
-                    declare print_start
-
-                    declare -p | while read i; do
-                        if [[ "\${i}" =~ ^declare[[:space:]]--[[:space:]]_\= ]]
-                        then
-                            print_start='True'
-                        fi
-
-                        if [[ -z "\${print_start:-}" ]]; then
-                            continue
-                        fi
-
-                        if [[ "\${i}" =~ ^declare[[:space:]]--[[:space:]]print_start ]] || \
-                           [[ "\${i}" =~ ^declare[[:space:]]--[[:space:]]_\=\"print_start\" ]]
-                        then
-                            continue
-                        fi
-
-                        echo "\${i}"
-                    done
-
-                    unset print_start
+                compgen -A 'function' | sort
 __SCRIPT__
-                )"
+                )
 
-                if [[ -n "${namespace:-}" ]]; then
-                    eval "$(echo "${inner_functions}" \
-                        | sed -r "s/^(\w+)/${namespace}::\\1/g")"
-                else
-                    eval "${inner_functions}"
-                    eval "${inner_variables}"
-                fi
-            else
-                mapfile -t outer_functions < <(compgen -A 'function' | sort)
-                mapfile -t outer_variables < <(compgen -A 'variable' | sort)
+            mapfile -t inner_variables < \
+                <(env -i bash --noprofile --norc << __SCRIPT__
+                source "${translated_import}"  &> /dev/null
 
-                mapfile -t inner_functions < \
-                    <(env -i bash --noprofile --norc << __SCRIPT__
-                    source "${self_source}"
-                    source "${translated_import}"
-
-                    compgen -A 'function' | sort
+                compgen -A 'variable' | sort
 __SCRIPT__
-                    )
+                )
 
-                mapfile -t inner_variables < \
-                    <(env -i bash --noprofile --norc << __SCRIPT__
-                    source "${self_source}"
-                    source "${translated_import}"
+            local inner_code
 
-                    compgen -A 'variable' | sort
-__SCRIPT__
-                    )
+            inner_code="$(
+                env -i bash --noprofile --norc << __SCRIPT__
+                source "${translated_import}" &> /dev/null
 
-                local function_body
+                declare function_name
+                declare function_body
 
-                for i in "${inner_functions[@]}"; do
-                    for o in "${outer_functions[@]}"; do
-                        if [[ "${i}" == "${o}" ]]; then
-                            continue 2
-                        fi
-                    done
-
-                    function_body="$(
-                        env -i bash --noprofile --norc << __SCRIPT__
-                        source "${self_source}"
-                        source "${translated_import}"
-
-                        declare -f "${i}"
-__SCRIPT__
-                        )"
-
-                    function_body="${function_body#*{}"
-                    function_body="${function_body%\}}"
-
+                for i in ${inner_functions[@]}; do
                     if [[ -n "${namespace:-}" ]]; then
-                        if [[ $(declare -f "${namespace}::${i}" &> /dev/null) ]]
-                        then
-                            error "Function ${namespace}::${i} is already defined"
-                        fi
-
-                        eval "${namespace}::${i}() { ${function_body} }"
+                        function_name="${namespace}::\${i}"
                     else
-                        if [[ $(declare -f "${i}" &> /dev/null) ]]; then
-                            error \
-                                "Function '${i}' in '${import}' is already defined"
-                        fi
-
-                        eval "${i}() { ${function_body} }"
+                        function_name="\${i}"
                     fi
+
+                    for o in ${outer_functions[@]}; do
+                        if [[ "\${function_name}" == "\${o}" ]]; then
+                            printf "echo \"Function \${function_name} is "
+                            printf "already defined\"\n"
+                            echo "exit 1"
+
+                            break 2
+                        fi
+                    done
+
+                    function_body="\$(declare -f \${i})"
+                    function_body="\${function_body#*{}"
+                    function_body="\${function_body%\}}"
+
+                    echo "\${function_name} () { \${function_body} }"
                 done
 
-                local variable_declare
+                unset function_name
+                unset function_body
 
-                for i in "${inner_variables[@]}"; do
-                    for o in "${outer_variables[@]}"; do
-                        if [[ "${i}" == "${o}" ]] || \
-                        [[ "${i}" == '__INIT__namespace__' ]]
-                        then
+                for i in ${inner_variables[@]}; do
+                    for o in ${outer_variables[@]}; do
+                        if [[ "\${i}" == "\${o}" ]]; then
                             continue 2
                         fi
                     done
 
-                    variable_declare="$(
-                        env -i bash --noprofile --norc << __SCRIPT__
-                        source "${self_source}"
-                        source "${translated_import}"
-
-                        declare -p "${i}"
-__SCRIPT__
-                        )"
-
-                    if [[ -v "${i}" ]]; then
-                        error "Variable '${i}' in '${import}' is already defined"
-                    else
-                        eval "${variable_declare}"
-                    fi
+                    declare -p "\${i}"
                 done
-            fi
+
+                unset i
+                unset o
+__SCRIPT__
+                    )"
+
+            eval "${inner_code}"
         fi
     done
 
@@ -513,7 +450,6 @@ Optional Arguments:
     -d, --debug                 Display debug information of path searches
     -h, --help                  Display function usage information
     -r, --reload                Re-import import even if imported previously
-    -u, --unsafe                Import unsafely (faster)
 
 Required Argument:
     @imports
@@ -578,7 +514,6 @@ Optional Arguments:
     -f, --from                  Prepend a namespace or path to import paths
     -h, --help                  Display function usage information
     -r, --reload                Re-import import even if previously imported
-    -u, --unsafe                Import unsafely (faster)
 
 Required Argument:
     @imports
