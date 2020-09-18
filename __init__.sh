@@ -39,7 +39,7 @@ fi
 # DEBUG
 #=============================================================================
 function debug::on {
-    declare -gx PS4='+ [${BASH_SOURCE}:${FUNCNAME[0]}(): ${LINENO}]:> '
+    declare -gx PS4=$'\U1F50D $(tput sgr0)$(tput bold)$(tput setaf 1)$(tput setaf 7)[$(tput setaf 5)$(basename ${BASH_SOURCE[0]}):$(tput setaf 4)${FUNCNAME[0]:-NOFUNC}():$(tput setaf 3)${LINENO}$(tput setaf 7)] - $(tput setaf 3)DEBUG: $(tput sgr0)'
 
     set -v
     set -x
@@ -73,14 +73,14 @@ function error {
 
     tput sgr0 >&2
     tput bold >&2
-    tput setaf 1; printf "%b" "\U1F480" >&2
-    tput setaf 7; printf ' [' >&2
-    tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
-    tput setaf 4; printf "%s" "${func_name}():" >&2
-    tput setaf 3; printf "%s" "${lineno}" >&2
-    tput setaf 7; printf "%s " '] -' >&2
-    tput setaf 1; printf "%s" " ERROR: " >&2
-    tput setaf 7; printf "%s\n" "$*" >&2
+    tput setaf 1 >&2; printf "%b" "\xF0\x9F\x92\x80" >&2
+    tput setaf 7 >&2; printf ' [' >&2
+    tput setaf 5 >&2; printf "%s" "$(basename "${bash_source}"):" >&2
+    tput setaf 4 >&2; printf "%s" "${func_name}():" >&2
+    tput setaf 3 >&2; printf "%s" "${lineno}" >&2
+    tput setaf 7 >&2; printf "%s " '] -' >&2
+    tput setaf 1 >&2; printf "%s" " ERROR: " >&2
+    tput setaf 7 >&2; printf "%s\n" "$*" >&2
 
     while [[ "${bash_source_count}" -ne "${trace_count}" ]]; do
         (( lineno_count += 1 ))
@@ -91,13 +91,13 @@ function error {
         bash_source="${BASH_SOURCE[${bash_source_count}]}"
         func_name="${FUNCNAME[${bash_source_count}]}"
 
-        tput setaf 3; printf "%-${indent}s%b " "" "\U27A1" >&2
-        tput setaf 7; printf '['  >&2
-        tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
-        tput setaf 4; printf "%s" "${func_name}():"  >&2
-        tput setaf 3; printf "%s" "${lineno}"  >&2
-        tput setaf 7; printf "%s " '] -'  >&2
-        tput setaf 6; printf "%s\n" \
+        tput setaf 3 >&2; printf "%-${indent}s%b " "" "\xE2\x9E\xA1" >&2
+        tput setaf 7 >&2; printf '['  >&2
+        tput setaf 5 >&2; printf "%s" "$(basename "${bash_source}"):" >&2
+        tput setaf 4 >&2; printf "%s" "${func_name}():"  >&2
+        tput setaf 3 >&2; printf "%s" "${lineno}"  >&2
+        tput setaf 7 >&2; printf "%s " '] -'  >&2
+        tput setaf 6 >&2; printf "%s\n" \
             "$(sed -n "${lineno}p" "${bash_source}" | sed -r 's|^\s+||')" >&2
     done
 
@@ -171,14 +171,11 @@ function import {
     local from
     local reload
     local translated_import
-    local unsafe
 
     while [[ "$#" -gt 0 ]]; do
         case "${1}" in
             -d | --debug )
                 readonly debug='True';    shift
-
-                debug::on
                 ;;
             -f | --from )
                 shift
@@ -206,6 +203,10 @@ function import {
     done
 
     local self_source
+
+    if [[ "${debug:-}" == 'True' ]]; then
+        debug::on
+    fi
 
     for import in "${imports[@]}"; do
         #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -241,19 +242,21 @@ function import {
                         elif [[ -d "${translated_import}/lib/${path}" ]]; then
                             translated_import+="/lib/${path}"
                         else
-                            error "Unable to find import '${import}'"
+                            continue 2
                         fi
                     done
                 fi
 
                 if [[ -f "${translated_import}/${paths[-1]}.sh" ]]; then
                     namespace_imported='True'
+                    translated_import+="/${paths[-1]}.sh"
 
-                    translated_import+="/${paths[-1]}.sh"; break 1
+                    break 1
                 elif [[ -f "${import}/lib/${paths[-1]}.sh" ]]; then
                     namespace_imported='True'
+                    translated_import+="/lib/${paths[-1]}.sh"
 
-                    translated_import+="/lib/${paths[-1]}.sh"; break 1
+                    break 1
                 else
                     continue
                 fi
@@ -308,99 +311,117 @@ function import {
             unset __INIT__import_list__["${translated_import}"]
         fi
 
-        self_source="$(
-            cd "$(dirname "${BASH_SOURCE[0]}")"; \
-            pwd -P)/$(basename "${BASH_SOURCE[0]}"
-        )"
+        self_source="$(cd "$(dirname "${BASH_SOURCE[0]}")";
+                       pwd -P)/$(basename "${BASH_SOURCE[0]}")"
 
-        if [[ ! -v __INIT__import_list__["${translated_import}"] ]]; then
-            __INIT__import_list__["${translated_import}"]=''
+        if [[ -v __INIT__import_list__["${translated_import}"] ]]; then
+            continue
+        fi
 
-            mapfile -t outer_functions < <(compgen -A 'function' | sort)
-            mapfile -t outer_variables < <(compgen -A 'variable' | sort)
+        __INIT__import_list__["${translated_import}"]=''
 
-            namespace="$(env -i bash --noprofile --norc << __SCRIPT__
-                source "${self_source}"
-                source "${translated_import}"
+        mapfile -t outer_functions < <(compgen -A 'function' | sort)
+        mapfile -t outer_variables < <(compgen -A 'variable' | sort)
 
-                echo "\${__INIT__namespace__:-}"
+        mapfile -t inner_functions < \
+            <(env -i bash --noprofile --norc << __SCRIPT__
+            source "${translated_import}" &> /dev/null
+
+            compgen -A 'function' | sort
+__SCRIPT__
+            )
+
+        mapfile -t inner_variables < \
+            <(env -i bash --noprofile --norc << __SCRIPT__
+            source "${translated_import}" &> /dev/null
+
+            compgen -A 'variable' | sort
+__SCRIPT__
+            )
+
+        local inner_code
+
+        inner_code="$(env -i bash --noprofile --norc << __SCRIPT__
+            source "${self_source}"
+            source "${translated_import}"
+
+            echo "source ${translated_import}"
+
+            declare variable_declare
+
+            for i in ${inner_variables[@]}; do
+                for o in ${outer_variables[@]}; do
+                    if [[ "\${i}" == "\${o}" ]]; then
+                        continue 2
+                    fi
+                done
+
+                if [[ "\${i}" == 'IFS' ]]; then
+                    continue
+                fi
+
+                variable_declare="\$(declare -p \${i})"
+
+                if [[ "\${variable_declare}" =~ ^'declare --' ]]; then
+                    echo "\${variable_declare/--/-g}"
+                else
+                    echo "\${variable_declare/-/-g}"
+                fi
+            done
+
+            unset i
+            unset o
+            unset variable_declare
+
+            declare function_name
+            declare function_body
+
+            for i in ${inner_functions[@]}; do
+                if [[ -n "\${__INIT__namespace__:-}" ]] && \
+                   [[ "\${i}" =~ ^[A-Za-z] ]]; then
+                    function_name="\${__INIT__namespace__}::\${i}"
+                else
+                    function_name="\${i}"
+                fi
+
+                for o in ${outer_functions[@]}; do
+                    if [[ "\${function_name}" == "\${o}" ]]; then
+                        cat << __EVAL__
+                            tput sgr0 >&2
+                            tput bold >&2
+                            tput setaf 1 >&2; printf "%b" "\xF0\x9F\x92\x80" >&2
+                            tput setaf 7 >&2; printf ' [' >&2
+                            tput setaf 5 >&2; printf "%s" "$(basename "${translated_import}"):" >&2
+                            tput setaf 4 >&2; printf "%s" "\${FUNCNAME[1]}():" >&2
+                            tput setaf 3 >&2; printf "%s" "\${BASH_LINENO[0]}" >&2
+                            tput setaf 7 >&2; printf "%s " '] -' >&2
+                            tput setaf 1 >&2; printf "%s" " ERROR: " >&2
+                            tput setaf 7 >&2; printf "%s\n" "Function '\${function_name}' is already defined" >&2
+                            tput sgr0 >&2
+__EVAL__
+
+                        echo "exit 1"
+
+                        break 2
+                    fi
+                done
+
+                function_body="\$(declare -f \${i})"
+                function_body="\${function_body#*{}"
+                function_body="\${function_body%\}}"
+
+                echo "\${function_name}() {\${function_body}}"
+            done
+
+            unset function_name
+            unset function_body
 __SCRIPT__
                 )"
 
-            mapfile -t inner_functions < \
-                <(env -i bash --noprofile --norc << __SCRIPT__
-                source "${translated_import}" &> /dev/null
+        eval "${inner_code}"
 
-                compgen -A 'function' | sort
-__SCRIPT__
-                )
-
-            mapfile -t inner_variables < \
-                <(env -i bash --noprofile --norc << __SCRIPT__
-                source "${translated_import}"  &> /dev/null
-
-                compgen -A 'variable' | sort
-__SCRIPT__
-                )
-
-            local inner_code
-
-            inner_code="$(
-                env -i bash --noprofile --norc << __SCRIPT__
-                source "${translated_import}" &> /dev/null
-
-                declare function_name
-                declare function_body
-
-                for i in ${inner_functions[@]}; do
-                    if [[ -n "${namespace:-}" ]]; then
-                        function_name="${namespace}::\${i}"
-                    else
-                        function_name="\${i}"
-                    fi
-
-                    for o in ${outer_functions[@]}; do
-                        if [[ "\${function_name}" == "\${o}" ]]; then
-                            printf "echo \"Function \${function_name} is "
-                            printf "already defined\"\n"
-                            echo "exit 1"
-
-                            break 2
-                        fi
-                    done
-
-                    function_body="\$(declare -f \${i})"
-                    function_body="\${function_body#*{}"
-                    function_body="\${function_body%\}}"
-
-                    echo "\${function_name} () { \${function_body} }"
-                done
-
-                unset function_name
-                unset function_body
-
-                for i in ${inner_variables[@]}; do
-                    for o in ${outer_variables[@]}; do
-                        if [[ "\${i}" == "\${o}" ]]; then
-                            continue 2
-                        fi
-                    done
-
-                    declare -p "\${i}"
-                done
-
-                unset i
-                unset o
-__SCRIPT__
-                    )"
-
-            eval "${inner_code}"
-        fi
+        unset inner_code
     done
-
-    if [[ -n "${debug:-}" ]] && [[ "${debug:-}" == 'True' ]]; then
-        debug::off
-    fi
 
     return
 }
@@ -411,36 +432,26 @@ __SCRIPT__
 function warning {
     debug::off
 
-    local -i indent=0
-    local -i lineno_count=0
-    local -i bash_source_count=1
-
-    local -i trace_count
-    trace_count="$(( ${#BASH_SOURCE[@]} - 1 ))"
-
-    local -i lineno="${BASH_LINENO[${lineno_count}]}"
-    local bash_source="${BASH_SOURCE[${bash_source_count}]}"
-    local func_name="${FUNCNAME[${bash_source_count}]}"
-
-    tput sgr0
+    tput sgr0 >&2
     tput bold >&2
-    tput setaf 1; printf "%b" "\U1F6A7" >&2
-    tput setaf 7; printf ' [' >&2
-    tput setaf 5; printf "%s" "$(basename "${bash_source}"):" >&2
-    tput setaf 4; printf "%s" "${func_name}():" >&2
-    tput setaf 3; printf "%s" "${lineno}" >&2
-    tput setaf 7; printf "%s " '] -' >&2
-    tput setaf 3; printf "%s" " WARNING: "
-    tput setaf 7; printf "%s\n" "$*" >&2
+    tput setaf 1 >&2; printf "%b" "\xE2\x9A\xA0" >&2
+    tput setaf 7 >&2; printf ' [' >&2
+    tput setaf 5 >&2; printf "%s" "$(basename "${BASH_SOURCE[1]}"):" >&2
+    tput setaf 4 >&2; printf "%s" "${FUNCNAME[1]}():" >&2
+    tput setaf 3 >&2; printf "%s" "${BASH_LINENO[0]}" >&2
+    tput setaf 7 >&2; printf "%s " '] -' >&2
+    tput setaf 3 >&2; printf "%s" " WARNING: "
+    tput setaf 7 >&2; printf "%s\n" "$*" >&2
     tput sgr0 >&2
 
     return
 }
+
 #=============================================================================
 # USAGE
 #=============================================================================
 function usage::__init__::from {
->&2 cat <<__USAGE__
+>&2 cat << __USAGE__
 
 Usage:
     from <namespace | path> import [-d] [-h] [-r] <imports[0]> <imports[1]>
@@ -504,7 +515,7 @@ __USAGE__
 }
 
 function usage::__init__::import {
->&2 cat <<__USAGE__
+>&2 cat << __USAGE__
 
 Usage:
     import [-d] [-f from] [-h] [-r] <imports[0]> <imports[1]> <imports[2]> ...
@@ -566,6 +577,7 @@ __USAGE__
 
     return
 }
+
 
 #=============================================================================
 # END
